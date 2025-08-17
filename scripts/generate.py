@@ -20,6 +20,8 @@ from PIL import Image
 from prismatic import load
 from prismatic.overwatch import initialize_overwatch
 
+from transformers import BlipProcessor, BlipForConditionalGeneration
+
 
 # Initialize Overwatch =>> Wraps `logging.Logger`
 overwatch = initialize_overwatch(__name__)
@@ -29,6 +31,7 @@ overwatch = initialize_overwatch(__name__)
 DEFAULT_IMAGE_URL = (
     "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/beignets-task-guide.png"
 )
+
 
 
 @dataclass
@@ -58,8 +61,13 @@ def generate(cfg: GenerateConfig) -> None:
     
 
     # Load the pretrained VLM --> uses default `load()` function
-    vlm = load(cfg.model_path, hf_token=hf_token)
-    vlm.to(device, dtype=torch.bfloat16)
+    # vlm = load(cfg.model_path, hf_token=hf_token)
+    # vlm.to(device, dtype=torch.bfloat16)
+    
+    # huggingface blip 
+    processor = BlipProcessor.from_pretrained(cfg.model_path)
+    model = BlipForConditionalGeneration.from_pretrained(cfg.model_path).to(device)
+    
 
     # Initial Setup
     image = Image.open(requests.get(DEFAULT_IMAGE_URL, stream=True).raw).convert("RGB")
@@ -110,19 +118,31 @@ def generate(cfg: GenerateConfig) -> None:
                 while True:
                     message = input("|=>> Enter Prompt: ")
 
-                    # Build Prompt
-                    prompt_builder.add_turn(role="human", message=message)
-                    prompt_text = prompt_builder.get_prompt()
+                    # # Build Prompt
+                    # prompt_builder.add_turn(role="human", message=message)
+                    # prompt_text = prompt_builder.get_prompt()
 
                     # Generate from the VLM
-                    generated_text = vlm.generate(
-                        image,
-                        prompt_text,
-                        do_sample=cfg.do_sample,
-                        temperature=cfg.temperature,
+                    # generated_text = vlm.generate(
+                    #     image,
+                    #     prompt_text,
+                    #     do_sample=cfg.do_sample,
+                    #     temperature=cfg.temperature,
+                    #     max_new_tokens=cfg.max_new_tokens,
+                    #     min_length=cfg.min_length,
+                    # )
+                    
+                    # huggingface model 
+                    inputs = processor(image, text=prompt_text, return_tensors="pt").to(device)
+                    output_ids = model.generate(
+                        **inputs, 
+                        do_sample=cfg.do_sample, 
+                        temperature=cfg.temperature, 
                         max_new_tokens=cfg.max_new_tokens,
                         min_length=cfg.min_length,
                     )
+                    generated_text = processor.decode(output_ids[0], skip_special_tokens=True)
+                    
                     prompt_builder.add_turn(role="gpt", message=generated_text)
                     print(f"\t|=>> VLM Response >>> {generated_text}\n")
 
